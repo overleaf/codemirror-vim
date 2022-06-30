@@ -32,11 +32,10 @@ type EditorViewExtended = EditorView&{cm:CodeMirror}
 const vimPlugin = ViewPlugin.fromClass(class implements PluginValue {
   private dom: HTMLElement;
   private keydownHandler;
-  public handledLatestKeydownEvent = false
   public view: EditorViewExtended;
   public cm: CodeMirror;
   public status = ""
-  blockCursor: BlockCursorPlugin 
+  blockCursor: BlockCursorPlugin
   constructor(view: EditorView) {
     this.view = view as EditorViewExtended
     const cm = this.cm = new CodeMirror(view);
@@ -63,7 +62,7 @@ const vimPlugin = ViewPlugin.fromClass(class implements PluginValue {
       this.updateClass()
       this.updateStatus()
     });
-    
+
 
     this.cm.on("dialog", () => {
       if (this.cm.state.statusbar) {
@@ -86,7 +85,6 @@ const vimPlugin = ViewPlugin.fromClass(class implements PluginValue {
   handleKeydownEvent(e: KeyboardEvent) {
     const key = CodeMirror.vimKey(e)
     const cm = this.cm
-    this.handledLatestKeydownEvent = false
     if (!key) return
 
     // clear search highlight
@@ -119,7 +117,10 @@ const vimPlugin = ViewPlugin.fromClass(class implements PluginValue {
 
     this.updateStatus()
 
-    this.handledLatestKeydownEvent = !!result
+    // Prevent CodeMirror receiving this event if it's been dealt with
+    if (result) {
+      e.stopPropagation()
+    }
   }
 
   update(update: ViewUpdate) {
@@ -127,16 +128,16 @@ const vimPlugin = ViewPlugin.fromClass(class implements PluginValue {
       this.cm.onChange(update)
       if (this.query)
         this.highlight(this.query)
-    } 
+    }
     if (update.selectionSet) {
       this.cm.onSelectionChange()
-    } 
+    }
     if (update.viewportChanged) {
       // scroll
     }
     if (this.cm.curOp && !this.cm.curOp.isVimOp) {
       this.cm.onBeforeEndOperation();
-    } 
+    }
     if (update.transactions) {
       for (let tr of update.transactions)
       for (let effect of tr.effects) {
@@ -158,7 +159,7 @@ const vimPlugin = ViewPlugin.fromClass(class implements PluginValue {
     const state = this.cm.state;
     if (!state.vim || (state.vim.insertMode && !state.overwrite))
       this.view.scrollDOM.classList.remove("cm-vimMode")
-    else 
+    else
       this.view.scrollDOM.classList.add("cm-vimMode")
   }
   updateStatus() {
@@ -190,7 +191,7 @@ const vimPlugin = ViewPlugin.fromClass(class implements PluginValue {
 
   highlight(query: any) {
     this.query = query;
-    if (!query) 
+    if (!query)
       return this.decorations = Decoration.none
     let {view} = this
     let builder = new RangeSetBuilder<Decoration>()
@@ -207,14 +208,6 @@ const vimPlugin = ViewPlugin.fromClass(class implements PluginValue {
   decorations = Decoration.none
 
 }, {
-  eventHandlers: {
-    keydown: function() {
-      // The plugin has already had the chance to handle the event in the
-      // capture phase. If it's handled it, it says so now
-      return this.handledLatestKeydownEvent
-    }
-  },
-  
   decorations: v => v.decorations
 })
 
