@@ -328,6 +328,7 @@ export function initVim(CodeMirror) {
     // @ts-ignore
     CodeMirror.off(cm.getInputField(), 'paste', getOnPasteFn(cm));
     cm.state.vim = null;
+    vimGlobalState.jumpList = createCircularJumpList();
     if (highlightTimeout) clearTimeout(highlightTimeout);
   }
 
