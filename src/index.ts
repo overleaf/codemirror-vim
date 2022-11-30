@@ -148,7 +148,7 @@ const vimPlugin = ViewPlugin.fromClass(
     }
 
     destroy() {
-      this.cm.state.vim = null;
+      Vim.leaveVimMode(this.cm);
       this.updateClass();
       this.blockCursor.destroy();
       delete (this.view as any).cm;

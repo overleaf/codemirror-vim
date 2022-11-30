@@ -711,6 +711,8 @@ export function initVim(CodeMirror) {
     var lastInsertModeKeyTimer;
     var vimApi = {
       enterVimMode: enterVimMode,
+      leaveVimMode: leaveVimMode,
+
       buildKeyMap: function() {
         // TODO: Convert keymap into dictionary format for fast lookup.
       },
