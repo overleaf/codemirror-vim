@@ -45,6 +45,7 @@ type EditorViewExtended = EditorView & { cm: CodeMirror };
 const vimPlugin = ViewPlugin.fromClass(
   class implements PluginValue {
     private dom: HTMLElement;
+    private statusButton: HTMLElement;
     public view: EditorViewExtended;
     public cm: CodeMirror;
     public status = "";
@@ -88,6 +89,12 @@ const vimPlugin = ViewPlugin.fromClass(
 
       this.dom = document.createElement("span");
       this.dom.style.cssText = "position: absolute; right: 10px; top: 1px";
+      this.statusButton = document.createElement("span");
+      this.statusButton.onclick = (e) => {
+        Vim.handleKey(this.cm, "<Esc>", "user");
+        this.cm.focus();
+      };
+      this.statusButton.style.cssText = "cursor: pointer";
     }
 
     update(update: ViewUpdate) {
@@ -140,7 +147,11 @@ const vimPlugin = ViewPlugin.fromClass(
           dom.appendChild(dialog);
         }
       } else {
-        dom.textContent = `--${(vim.mode || "normal").toUpperCase()}--`;
+        dom.textContent = ""
+        var status = (vim.mode || "normal").toUpperCase();
+        if (vim.insertModeReturn) status += "(C-O)"
+        this.statusButton.textContent = `--${status}--`;
+        dom.appendChild(this.statusButton);
       }
 
       this.dom.textContent = vim.status;
@@ -180,7 +191,7 @@ const vimPlugin = ViewPlugin.fromClass(
     }
     query = null;
     decorations = Decoration.none;
-
+    waitForCopy = false;
     handleKey(e: KeyboardEvent, view: EditorView) {
       const key = CodeMirror.vimKey(e);
       const cm = this.cm;
@@ -200,6 +211,12 @@ const vimPlugin = ViewPlugin.fromClass(
           cm.removeOverlay(searchState.getOverlay())
           searchState.setOverlay(null);
         }
+      }
+
+      let isCopy = key === "<C-c>" && !CodeMirror.isMac;
+      if (isCopy && cm.somethingSelected()) {
+        this.waitForCopy = true;
+        return true;
       }
 
       vim.status = (vim.status || "") + key;
@@ -228,22 +245,100 @@ const vimPlugin = ViewPlugin.fromClass(
       return !!result;
     }
     lastKeydown = ''
+    useNextTextInput = false
   },
   {
     eventHandlers: {
+      copy: function(e: ClipboardEvent, view: EditorView) {
+        if (!this.waitForCopy) return;
+        this.waitForCopy = false;
+        Promise.resolve().then(() => {
+          var cm = this.cm;
+          var vim = cm.state.vim;
+          if (!vim) return;
+          if (vim.insertMode) {
+            cm.setSelection(cm.getCursor(), cm.getCursor());
+          } else {
+            cm.operation(() => {
+              if (cm.curOp) cm.curOp.isVimOp = true;
+              Vim.handleKey(cm, '<Esc>', 'user');
+            });
+          }
+        });
+      },
       keypress: function(e: KeyboardEvent, view: EditorView) {
-        if (this.lastKeydown == "Dead" || (e.altKey && !e.ctrlKey && !e.cmdKey))
+        if (this.lastKeydown == "Dead")
           this.handleKey(e, view);
       },
       keydown: function(e: KeyboardEvent, view: EditorView) {
         this.lastKeydown = e.key;
-        this.handleKey(e, view);
+        if (
+          this.lastKeydown == "Unidentified"
+          || this.lastKeydown == "Process"
+          || this.lastKeydown == "Dead"
+        ) {
+          this.useNextTextInput = true;
+        } else {
+          this.useNextTextInput = false;
+          this.handleKey(e, view);
+        }
       },
+    },
+    provide: () => {
+      return [
+        EditorView.inputHandler.of((view, from, to, text) => {
+          var cm = getCM(view);
+          if (!cm) return false;
+          var vim = cm.state?.vim;
+          var vimPlugin = cm.state.vimPlugin;
+
+          if (vim && !vim.insertMode && !cm.curOp?.isVimOp) {
+            if (text.length == 1 && vimPlugin.useNextTextInput) {
+              vimPlugin.handleKey({
+                key: text,
+                preventDefault: ()=>{},
+                stopPropagation: ()=>{}
+              });
+            }
+            forceEndComposition(view);
+            return true;
+          }
+          return false;
+        })
+      ]
     },
 
     decorations: (v) => v.decorations,
   }
 );
+
+function forceEndComposition(view: EditorView) {
+  var parent = view.scrollDOM.parentElement;
+  if (!parent) return;
+  var sibling = view.scrollDOM.nextSibling;
+  var selection = window.getSelection();
+  var savedSelection = selection && {
+    anchorNode: selection.anchorNode,
+    anchorOffset: selection.anchorOffset,
+    focusNode: selection.focusNode,
+    focusOffset: selection.focusOffset
+  };
+
+  view.scrollDOM.remove();
+  parent.insertBefore(view.scrollDOM, sibling);
+  try {
+    if (savedSelection && selection) {
+      selection.setPosition(savedSelection.anchorNode, savedSelection.anchorOffset);
+      if (savedSelection.focusNode) {
+        selection.extend(savedSelection.focusNode, savedSelection.focusOffset);
+      }
+    }
+  } catch(e) {
+    console.error(e);
+  }
+  view.focus();
+  view.contentDOM.dispatchEvent(new CustomEvent("compositionend"));
+}
 
 const matchMark = Decoration.mark({ class: "cm-searchMatch" });
 

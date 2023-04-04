@@ -155,7 +155,7 @@ function expectFail(fn) {
 
 function vimKeyToKeyName(key) {
   return key.replace(/[CS]-|CR|BS/g, function(part) {
-    return {"C-": "Ctrl-", "S-": "Shift", CR: "Return", BS: "Backspace"}[part];
+    return {"C-": "Ctrl-", "S-": "Shift-", CR: "Return", BS: "Backspace"}[part];
   });
 }
 
@@ -171,7 +171,7 @@ function testVim(name, run, opts, expectedFail) {
       vimOpts[prop] = opts[prop];
     }
   }
-  return test('vim_' + name, function() {
+  return test('vim_' + name, async function() {
     var place = document.getElementById("testground");
     place.style.visibility = "visible";
     var cm = CodeMirror(place, vimOpts);
@@ -230,7 +230,7 @@ function testVim(name, run, opts, expectedFail) {
     CodeMirror.Vim.resetVimGlobalState_();
     var successful = false;
     try {
-      run(cm, vim, helpers);
+      await run(cm, vim, helpers);
       successful = true;
     } finally {
       if (successful && !window.verbose) {
@@ -1282,7 +1282,7 @@ testVim('s_visual_block', function(cm, vim, helpers) {
 }, {value: '1234\n5678\nabcdefg\n'});
 
 // Test mode change event. It should only fire once per mode transition.
-testVim('on_mode_change', function(cm, vim, helpers) {
+testVim('on_mode_change', async function(cm, vim, helpers) {
   var modeHist = [];
   function callback(arg) {
     var subMode = arg.subMode ? ':' + arg.subMode : '';
@@ -1290,9 +1290,11 @@ testVim('on_mode_change', function(cm, vim, helpers) {
   }
   helpers.doKeys('<Esc>', '<Esc>');
   cm.on('vim-mode-change', callback);
-  function test(key, mode) {
+  async function test(key, mode) {
     modeHist.length = 0;
     helpers.doKeys(key);
+    if (key == '<C-c>' && !isOldCodeMirror)
+      await delay(0);
     eq(modeHist.join(';'), mode);
   }
   test('v', 'visual');
@@ -1308,7 +1310,7 @@ testVim('on_mode_change', function(cm, vim, helpers) {
   test('V', 'visual:linewise');
   test('<C-v>', 'visual:blockwise');
   test('v', 'visual');
-  test('<C-c>', 'normal');
+  await test('<C-c>', 'normal');
   test('a', 'insert');
   test('<Esc>', 'normal');
   test('v', 'visual');
@@ -1493,6 +1495,9 @@ testEdit('diw_end_spc', 'foo \tbAr', /A/, 'diw', 'foo \t');
 testEdit('daw_end_spc', 'foo \tbAr', /A/, 'daw', 'foo');
 testEdit('diw_end_punct', 'foo \tbAr.', /A/, 'diw', 'foo \t.');
 testEdit('daw_end_punct', 'foo \tbAr.', /A/, 'daw', 'foo.');
+testEdit('diw_space_word1', 'foo \t\n\tbar.', /\t/, 'diw', 'foo\n\tbar.');
+testEdit('diw_space_word2', 'foo +bar.', / /, 'diw', 'foo+bar.');
+testEdit('diw_space_word3', ' foo bar.', / /, 'diw', 'foo bar.');
 // Big word:
 testEdit('diW_mid_spc', 'foo \tbAr\t baz', /A/, 'diW', 'foo \t\t baz');
 testEdit('daW_mid_spc', 'foo \tbAr\t baz', /A/, 'daW', 'foo \tbaz');
@@ -1508,6 +1513,7 @@ testEdit('diW_end_spc', 'foo \tbAr', /A/, 'diW', 'foo \t');
 testEdit('daW_end_spc', 'foo \tbAr', /A/, 'daW', 'foo');
 testEdit('diW_end_punct', 'foo \tbAr.', /A/, 'diW', 'foo \t');
 testEdit('daW_end_punct', 'foo \tbAr.', /A/, 'daW', 'foo');
+testEdit('diW_space_word2', 'foo +bar.', / /, 'diW', 'foo+bar.');
 // Deleting text objects
 //    Open and close on same line
 testEdit('di(_open_spc', 'foo (bAr) baz', /\(/, 'di(', 'foo () baz');
@@ -1613,6 +1619,18 @@ testSelection('viw_eol', 'foo \tbAr', /r/, 'viw', 'bAr');
 testSelection('vi{_middle_spc', 'a{\n\tbar\n\t}b', /r/, 'vi{', '\n\tbar\n\t');
 testSelection('va{_middle_spc', 'a{\n\tbar\n\t}b', /r/, 'va{', '{\n\tbar\n\t}');
 
+testVim('ci" for two strings', function(cm, vim, helpers) {
+  cm.setCursor(0, 11);
+  helpers.doKeys('c', 'i', '"');
+  eq('   "":  "string2";', cm.getValue());
+  helpers.doKeys('<Esc>', 'u', 'f', '"', '<Right>');
+  helpers.doKeys('c', 'i', '"');
+  eq('   "string1""string2";', cm.getValue());
+  helpers.doKeys('<Esc>', 'u', 'f', '"');
+  helpers.doKeys('c', 'i', '"');
+  eq('   "string1":  "";', cm.getValue());
+}, {value: '   "string1":  "string2";'});
+
 testVim('mouse_select', function(cm, vim, helpers) {
   cm.setSelection(new Pos(0, 2), new Pos(0, 4), {origin: '*mouse'});
   is(cm.state.vim.visualMode);
@@ -1706,6 +1724,16 @@ testVim('<C-x>/<C-a> search forward', function(cm, vim, helpers) {
     helpers.assertCursorAt(0, 11);
   });
 }, {value: '__jmp1 jmp2 jmp'});
+testVim('insert_ctrl_o', function(cm, vim, helpers) {
+  helpers.doKeys('i');
+  is(vim.insertMode);
+  helpers.doKeys('<C-o>');
+  is(!vim.insertMode);
+  helpers.doKeys('3', 'w');
+  is(vim.insertMode);
+  eqCursorPos(makeCursor(0, 14), cm.getCursor());
+  eq('vim-insert', cm.getOption('keyMap'));
+}, { value: 'one two three here' });
 testVim('insert_ctrl_u', function(cm, vim, helpers) {
   var curStart = makeCursor(0, 10);
   cm.setCursor(curStart);
@@ -3729,6 +3757,25 @@ testVim('Ty,;', function(cm, vim, helpers) {
   helpers.doKeys('y', ',', 'P');
   eq('01230123456789', cm.getValue());
 }, { value: '0123456789'});
+testVim('vFT', function(cm, vim, helpers) {
+  cm.setCursor(0, 0);
+  helpers.doKeys('v', 'f', '1');
+  helpers.assertCursorAt(0, 2);
+  helpers.doKeys('2', 't', ' ');
+  helpers.assertCursorAt(0, 8);
+  eqCursorPos(new Pos(0, 0), cm.getCursor('anchor'));
+  helpers.doKeys('<Esc>');
+  eqCursorPos(new Pos(0, 7), cm.getCursor('anchor'));
+  helpers.doKeys('v', 'F', '3');
+  helpers.assertCursorAt(0, 3);
+  eqCursorPos(new Pos(0, 8), cm.getCursor('anchor'));
+  helpers.doKeys('T', '1');
+  helpers.assertCursorAt(0, 2);
+  helpers.doKeys('F', '1');
+  helpers.assertCursorAt(0, 1);
+  helpers.doKeys('F', '1');
+  helpers.assertCursorAt(0, 0);
+}, { value: '1123 123 123'});
 testVim('page_motions', function(cm, vim, helpers) {
   var value = "x".repeat(200).split("").map((_, i)=>i).join("\n");
   cm.setValue(value);
@@ -4123,6 +4170,13 @@ testVim('ex_write', function(cm, vim, helpers) {
   }
   CodeMirror.commands.save = tmp;
 });
+testVim('ex_delete', function(cm, vim, helpers) {
+  helpers.doKeys("j");
+  helpers.doEx('delete');
+  eq('l 1\nl 3\nl 4\n', cm.getValue());
+  helpers.doEx('d');
+  eq('l 1\nl 4\n', cm.getValue());
+}, { value: 'l 1\nl 2\nl 3\nl 4\n'});
 testVim('ex_sort', function(cm, vim, helpers) {
   helpers.doEx('sort');
   eq('Z\na\nb\nc\nd', cm.getValue());
@@ -4971,6 +5025,21 @@ testVim('noremap', function(cm, vim, helpers) {
   // unmap all mappings
   CodeMirror.Vim.mapclear();
 }, { value: 'wOrd1' });
+// noremap should capture all mappings of the rhs 
+testVim('noremap_all_mappings', function(cm, vim, helpers) {
+  // mapping to 'u' should undo in normal mode and lowercase in visual mode
+  CodeMirror.Vim.noremap('a', 'u');
+  helpers.doKeys('y', 'y', 'p');
+  eq('HeY\nHeY', cm.getValue());
+  // undo
+  helpers.doKeys('a');
+  eq('HeY', cm.getValue());
+  // lowercase
+  helpers.doKeys('V', 'a');
+  eq('hey', cm.getValue());
+  // unmap all mappings
+  CodeMirror.Vim.mapclear();
+}, { value: 'HeY' });
 testVim('noremap_swap', function(cm, vim, helpers) {
   CodeMirror.Vim.noremap('i', 'a', 'normal');
   CodeMirror.Vim.noremap('a', 'i', 'normal');
@@ -5295,12 +5364,35 @@ testVim('increment_hexadecimal', function(cm, vim, helpers) {
 }, { value: '0x0' });
 
 testVim('option_key_on_mac', function(cm, vim, helpers) {
+  CodeMirror.isMac = true;
   helpers.assertCursorAt(0, 0);
   typeKey.optionTextInput('9', '}');
   helpers.assertCursorAt(3, 0);
   typeKey.optionTextInput('8', '{');
   helpers.assertCursorAt(0, 0);
+  CodeMirror.isMac = false;
 }, { value: '0\n1\n2\n\n\n3\n4\n' });
+
+
+!isOldCodeMirror && testVim('<C-c>copy', async function(cm, vim, helpers) {
+  helpers.doKeys('v', 'e');
+  is(vim.visualMode);
+  typeKey.clipboard.$data = '';
+  helpers.doKeys('<C-c>');
+  eq(typeKey.clipboard.$data, 'hello');
+  await delay(0);
+  is(!vim.visualMode);
+  helpers.doKeys('w', 'i', '<S-C-Right>');
+  is(vim.insertMode);
+  helpers.doKeys('<C-c>');
+  is(vim.insertMode);
+  helpers.doKeys('<C-c>');
+  eq(typeKey.clipboard.$data, 'world');
+  await delay(0);
+  is(vim.insertMode);
+  helpers.doKeys('<C-c>');
+  is(!vim.insertMode);
+}, { value: 'hello world' })
 
 testVim('<C-r>_insert_mode', function(cm, vim, helpers) {
   helpers.assertCursorAt(0, 0);
@@ -5308,6 +5400,10 @@ testVim('<C-r>_insert_mode', function(cm, vim, helpers) {
   helpers.doKeys('<C-r>', '-');
   eq('456 123 ', cm.getValue());
 }, { value: '123 456 ' });
+
+async function delay(t) {
+  return await new Promise(resolve => setTimeout(resolve, t));
+}
 
 }
 
@@ -5420,12 +5516,16 @@ var typeKey = function() {
     if (!prevented) updateTextInput();
     emit("keyup", true);
 
-    function emitClipboard(type) {
+    function emitClipboard(eventType) {
       var data = {bubbles: true, cancelable:true};
-      var event = new KeyboardEvent(type, data);
+      var event = new KeyboardEvent(eventType, data);
       event.clipboardData = {
-        setData: function() {},
-        getData: function() {},
+        setData: function(mime, text) {
+          type.clipboard.$data = text;
+        },
+        getData: function() {
+          return type.clipboard.$data;
+        },
         clearData: function() {},
       };
       target.dispatchEvent(event);
@@ -5496,8 +5596,11 @@ var typeKey = function() {
         var isKeyName = controlKeys[key] || printableKeys[key] || shiftedKeys[key];
         if (!isKeyName) {
           var parts = key.split("-");
-          var modifier = alias[parts[0]] || parts[0];
-          if (!updateModifierStates(controlKeys[modifier])) {
+          var modifiers = parts.slice(0, parts.length - 1).map(function(part) {
+            return controlKeys[alias[part] || part];
+          });
+          var isValid = modifiers.length && modifiers.every(updateModifierStates);
+          if (!isValid) {
             type.apply(null, key.split(""));
             continue;
           }
@@ -5516,7 +5619,9 @@ var typeKey = function() {
   type.optionTextInput = function(letter, altText) {
     reset();
     sendKey(letter, {macAltText: altText});
-  }
+  };
+
+  type.clipboard = {};
 
   return type;
 }();
