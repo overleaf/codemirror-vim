@@ -1618,6 +1618,7 @@ testSelection('viw_end_spc', 'foo \tbAr\t baz', /r/, 'viw', 'bAr');
 testSelection('viw_eol', 'foo \tbAr', /r/, 'viw', 'bAr');
 testSelection('vi{_middle_spc', 'a{\n\tbar\n\t}b', /r/, 'vi{', '\n\tbar\n\t');
 testSelection('va{_middle_spc', 'a{\n\tbar\n\t}b', /r/, 'va{', '{\n\tbar\n\t}');
+testSelection('va{outside', 'xa{\n\tbar\n\t}b', /x/, 'va{', '{\n\tbar\n\t}');
 
 testVim('ci" for two strings', function(cm, vim, helpers) {
   cm.setCursor(0, 11);
@@ -4897,6 +4898,17 @@ testVim('ex_map_key2key_visual_api', function(cm, vim, helpers) {
   CodeMirror.commands.save = tmp;
   CodeMirror.Vim.mapclear();
 });
+testVim('ex_omap', function(cm, vim, helpers) {
+  helpers.doKeys('0', 'w', 'd', 'w');
+  eq(cm.getValue(), 'hello world');
+  helpers.doKeys('u');
+  helpers.doKeys(':', 'omap w $\n');
+  helpers.doKeys( '0', 'w');
+  helpers.assertCursorAt(0, 6);
+  helpers.doKeys('d', 'w');
+  eq(cm.getValue(), 'hello ');
+  CodeMirror.Vim.mapclear();
+}, {value: 'hello unfair world'});
 testVim('ex_imap', function(cm, vim, helpers) {
   CodeMirror.Vim.map('jk', '<Esc>', 'insert');
   helpers.doKeys('i');

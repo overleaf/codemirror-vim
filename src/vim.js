@@ -269,6 +269,7 @@ export function initVim(CodeMirror) {
     { name: 'imap', shortName: 'im' },
     { name: 'nmap', shortName: 'nm' },
     { name: 'vmap', shortName: 'vm' },
+    { name: 'omap', shortName: 'om' },
     { name: 'unmap' },
     { name: 'write', shortName: 'w' },
     { name: 'undo', shortName: 'u' },
@@ -2178,10 +2179,18 @@ export function initVim(CodeMirror) {
         //     'iw', 'a[', 'i[', etc.
         var inclusive = !motionArgs.textObjectInner;
 
-        var tmp;
+        var tmp, move;
         if (mirroredPairs[character]) {
+          move = true;
           tmp = selectCompanionObject(cm, head, character, inclusive);
+          if (!tmp) {
+            var sc = cm.getSearchCursor(new RegExp("\\" + character, "g"), head)
+            if (sc.find()) {
+              tmp = selectCompanionObject(cm, sc.from(), character, inclusive);
+            }
+          }
         } else if (selfPaired[character]) {
+          move = true;
           tmp = findBeginningAndEnd(cm, head, character, inclusive);
         } else if (character === 'W') {
           tmp = expandWordUnderCursor(cm, inclusive, !inclusive /** innerWord */,
@@ -2225,7 +2234,7 @@ export function initVim(CodeMirror) {
         if (!cm.state.vim.visualMode) {
           return [tmp.start, tmp.end];
         } else {
-          return expandSelection(cm, tmp.start, tmp.end);
+          return expandSelection(cm, tmp.start, tmp.end, move);
         }
       },
 
@@ -3081,11 +3090,13 @@ export function initVim(CodeMirror) {
       // Partial matches are not applied. They inform the key handler
       // that the current key sequence is a subsequence of a valid key
       // sequence, so that the key buffer is not cleared.
+      var operatorPending = inputState.operator;
       var match, partial = [], full = [];
       for (var i = 0; i < keyMap.length; i++) {
         var command = keyMap[i];
         if (context == 'insert' && command.context != 'insert' ||
-            command.context && command.context != context ||
+            (command.context == "operatorPending" ? !operatorPending 
+              : command.context && command.context != context) ||
             inputState.operator && command.type == 'action' ||
             !(match = commandMatch(keys, command.keys))) { continue; }
         if (match == 'partial') { partial.push(command); }
@@ -3313,10 +3324,10 @@ export function initVim(CodeMirror) {
                            'visualLine': vim.visualLine,
                            'visualBlock': vim.visualBlock};
     }
-    function expandSelection(cm, start, end) {
+    function expandSelection(cm, start, end, move) {
       var sel = cm.state.vim.sel;
-      var head = sel.head;
-      var anchor = sel.anchor;
+      var head = move ? start: sel.head;
+      var anchor = move ? start: sel.anchor;
       var tmp;
       if (cursorIsBefore(end, start)) {
         tmp = end;
@@ -4286,9 +4297,7 @@ export function initVim(CodeMirror) {
       start = cm.scanForBracket(new Pos(cur.line, cur.ch + offset), -1, undefined, {'bracketRegex': bracketRegexp});
       end = cm.scanForBracket(new Pos(cur.line, cur.ch + offset), 1, undefined, {'bracketRegex': bracketRegexp});
 
-      if (!start || !end) {
-        return { start: cur, end: cur };
-      }
+      if (!start || !end) return null;
 
       start = start.pos;
       end = end.pos;
@@ -5143,6 +5152,7 @@ export function initVim(CodeMirror) {
       imap: function(cm, params) { this.map(cm, params, 'insert'); },
       nmap: function(cm, params) { this.map(cm, params, 'normal'); },
       vmap: function(cm, params) { this.map(cm, params, 'visual'); },
+      omap: function(cm, params) { this.map(cm, params, 'operatorPending'); },
       unmap: function(cm, params, ctx) {
         var mapArgs = params.args;
         if (!mapArgs || mapArgs.length < 1 || !exCommandDispatcher.unmap(mapArgs[0], ctx)) {
