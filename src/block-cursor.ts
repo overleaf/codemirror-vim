@@ -2,6 +2,15 @@ import { SelectionRange, Prec } from "@codemirror/state"
 import { ViewUpdate, EditorView, Direction } from "@codemirror/view"
 import { CodeMirror } from "."
 
+// backwards compatibility for old versions not supporting getDrawSelectionConfig
+import * as View  from "@codemirror/view"
+let getDrawSelectionConfig = View.getDrawSelectionConfig || function() {
+  let defaultConfig = {cursorBlinkRate: 1200};
+  return function() {
+    return defaultConfig;
+  }
+}();
+
 type Measure = {cursors: Piece[]}
 
 class Piece {
@@ -11,7 +20,6 @@ class Piece {
               readonly fontSize: string,
               readonly fontWeight: string,
               readonly color: string,
-              readonly tabSize: string,
               readonly className: string,
               readonly letter: string,
               readonly partial: boolean) {}
@@ -32,7 +40,6 @@ class Piece {
     elt.style.fontSize = this.fontSize;
     elt.style.fontWeight = this.fontWeight;
     elt.style.color = this.partial ? "transparent" : this.color;
-    elt.style.tabSize = this.tabSize;
 
     elt.className = this.className;
     elt.textContent = this.letter;
@@ -65,7 +72,9 @@ export class BlockCursorPlugin {
   }
 
   setBlinkRate() {
-    this.cursorLayer.style.animationDuration = 1200 + "ms"
+    let config = getDrawSelectionConfig(this.cm.cm6.state);
+    let blinkRate = config.cursorBlinkRate;
+    this.cursorLayer.style.animationDuration = blinkRate + "ms";
   }
 
   update(update: ViewUpdate) {
@@ -73,6 +82,7 @@ export class BlockCursorPlugin {
       this.view.requestMeasure(this.measureReq)
       this.cursorLayer.style.animationName = this.cursorLayer.style.animationName == "cm-blink" ? "cm-blink2" : "cm-blink"
      }
+     if (configChanged(update)) this.setBlinkRate();
   }
 
   scheduleRedraw() {
@@ -85,7 +95,7 @@ export class BlockCursorPlugin {
     for (let r of state.selection.ranges) {
       let prim = r == state.selection.main
       let piece = measureCursor(this.cm, this.view, r, prim)
-      if (piece) cursors.push(piece)      
+      if (piece) cursors.push(piece)
     }
     return {cursors}
   }
@@ -107,6 +117,9 @@ export class BlockCursorPlugin {
   destroy() {
     this.cursorLayer.remove()
   }
+}
+function configChanged(update: ViewUpdate) {
+  return getDrawSelectionConfig(update.startState) != getDrawSelectionConfig(update.state)
 }
 
  const themeSpec = {
@@ -171,14 +184,27 @@ function measureCursor(cm: CodeMirror, view: EditorView, cursor: SelectionRange,
       node = node.parentNode;
     }
     let style = getComputedStyle(node as HTMLElement);
-    if (!letter || letter == "\n" || letter == "\r") letter = "\xa0";
-    else if ((/[\uD800-\uDBFF]/.test(letter) && head < view.state.doc.length - 1)) {
+    let left = pos.left;
+    // TODO remove coordsAtPos when all supported versions of codemirror have coordsForChar api
+    let charCoords = (view as any).coordsForChar?.(head);
+    if (charCoords) {
+      left = charCoords.left;
+    }
+    if (!letter || letter == "\n" || letter == "\r") {
+      letter = "\xa0";
+    } else if (letter == "\t") {
+      letter = "\xa0";
+      var nextPos = view.coordsAtPos(head + 1, -1);
+      if (nextPos) {
+        left = nextPos.left - (nextPos.left - pos.left) / parseInt(style.tabSize);
+      }
+    } else if ((/[\uD800-\uDBFF]/.test(letter) && head < view.state.doc.length - 1)) {
       // include the second half of a surrogate pair in cursor
       letter += view.state.sliceDoc(head + 1, head + 2);
     }
     let h = (pos.bottom - pos.top);
-    return new Piece(pos.left - base.left, pos.top - base.top + h * (1 - hCoeff), h * hCoeff,
-                     style.fontFamily, style.fontSize, style.fontWeight, style.color, style.tabSize,
+    return new Piece(left - base.left, pos.top - base.top + h * (1 - hCoeff), h * hCoeff,
+                     style.fontFamily, style.fontSize, style.fontWeight, style.color,
                      primary ? "cm-fat-cursor cm-cursor-primary" : "cm-fat-cursor cm-cursor-secondary",
                      letter, hCoeff != 1)
   } else {
