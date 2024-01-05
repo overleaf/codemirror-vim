@@ -1,13 +1,14 @@
 import { basicSetup, EditorView } from 'codemirror'
-import { highlightActiveLine, keymap } from '@codemirror/view';
+import { highlightActiveLine, keymap, Decoration, DecorationSet,
+   ViewPlugin, ViewUpdate, WidgetType, drawSelection } from '@codemirror/view';
 import { javascript } from '@codemirror/lang-javascript';
 import { xml } from '@codemirror/lang-xml';
 import { Vim, vim } from "../src/index"
 
 import * as commands from "@codemirror/commands";
-import { Annotation, Compartment, EditorState, Extension, Transaction } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, Extension, Transaction, Range } from '@codemirror/state';
 
-const doc = `//🌞
+const doc = `//\t🌞 אבג
 import { basicSetup, EditorView } from 'codemirror'
 import { javascript } from '@codemirror/lang-javascript';
 import { vim } from "../src/"
@@ -44,6 +45,58 @@ function addOption(name, description?, onclick?) {
   return value
 }
 
+class TestWidget extends WidgetType {
+    constructor(private side: number) {
+        super(); 
+    }
+    eq(other) {
+        return (true);
+    }
+    toDOM() {
+        const wrapper = document.createElement('span');
+        wrapper.textContent =  " widget" + this.side + " "
+        wrapper.style.opacity = '0.4';
+        return wrapper;
+    }
+    ignoreEvent() {
+        return false;
+    }
+}
+
+function widgets(view: EditorView) {
+  let widgets: Range<Decoration>[] = [];
+  for (let i = 0; i < 10; i++) {
+    let side = widgets.length % 2 ? 1 : -1
+    let deco = Decoration.widget({
+      widget: new TestWidget(side),
+      side: side
+    })
+    widgets.push(deco.range(200 + 10 * i))
+  }
+  console.log(widgets)
+  return Decoration.set(widgets)
+}
+
+const testWidgetPlugin = ViewPlugin.fromClass(class {
+  decorations: DecorationSet
+
+  constructor(view: EditorView) {
+    this.decorations = widgets(view)
+  }
+
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.viewportChanged)
+      this.decorations = widgets(update.view)
+  }
+}, {
+  decorations: v => v.decorations,
+
+  eventHandlers: {
+    mousedown: (e, view) => {
+    }
+  }
+})
+
 var options = {
   wrap: addOption("wrap"),
   html: addOption("html"),
@@ -58,6 +111,15 @@ var options = {
 
   }),
 };
+
+
+
+Vim.defineOption('wrap', false, 'boolean', null, function(val, cm) {
+  if (val == undefined) return options.wrap;
+  var checkbox = document.getElementById("wrap");
+  checkbox.checked = val;
+  checkbox.onclick();
+});
 
 var focusEditorButton = document.createElement("button");
 focusEditorButton.onclick = function(e) {
@@ -97,14 +159,12 @@ var defaultExtensions = [
         return true
       }
     }
-  ])
+  ]),
 ]
 
 function saveTab(name) {
   return EditorView.updateListener.of((v) => {
-    if (v.docChanged) {
-      tabs[name] = v.state;
-    }
+    tabs[name] = v.state;
   })
 }
 
@@ -115,7 +175,7 @@ var tabs = {
   }),
   html: EditorState.create({
     doc: document.documentElement.outerHTML,
-    extensions: [...defaultExtensions, xml(), saveTab("html")]
+    extensions: [...defaultExtensions, testWidgetPlugin, xml(), saveTab("html")]
   })
 }
 
@@ -130,6 +190,7 @@ function updateView() {
   var extensions = [
     enableVim && vim({status: options.status}),
     options.wrap && EditorView.lineWrapping,
+    drawSelection({cursorBlinkRate: window.blinkRate})
   ].filter((x)=>!!x) as Extension[];
   
   view.dispatch({
@@ -211,3 +272,36 @@ function createView() {
 
 
 updateView()
+
+// save and  restor search history
+
+
+function saveHistory(name) {
+  var controller = Vim.getVimGlobalState_()[name];
+  var json = JSON.stringify(controller);
+  if (json.length > 10000) {
+    var toTrim = JSON.parse(json);
+    toTrim.historyBuffer = toTrim.historyBuffer.slice(toTrim.historyBuffer.lenght/2);
+    toTrim.iterator = toTrim.historyBuffer.lenght;
+    json = JSON.stringify(toTrim);
+  }
+  localStorage[name] = json;
+}
+function restoreHistory(name) {
+  try {
+    var json = JSON.parse(localStorage[name]);
+    var controller = Vim.getVimGlobalState_()[name];
+    controller.historyBuffer = json.historyBuffer.filter(x => typeof x == "string" && x)
+    controller.iterator = Math.min(parseInt(json.iterator) || Infinity, controller.historyBuffer.length)
+  } catch(e) {
+
+  }
+}
+
+restoreHistory('exCommandHistoryController');
+restoreHistory('searchHistoryController');
+
+window.onunload = function() {
+  saveHistory('exCommandHistoryController');
+  saveHistory('searchHistoryController');
+}
