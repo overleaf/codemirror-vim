@@ -9,7 +9,7 @@
     "testAll": "yarn run static && yarn run test && cd dev/cm5 && yarn run buildAndTest",
     "build": "cm-buildhelper src/index.ts",
     "publish": "yarn run build && npm publish",
-    "prepare": "yarn run build"
+    "prepare": "npm run build"
   },
   "keywords": [
     "editor",
