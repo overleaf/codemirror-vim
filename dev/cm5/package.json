@@ -1,6 +1,6 @@
 {
   "name": "cm5-vim",
-  "version": "0.0.6",
+  "version": "6.2.1",
   "description": "Vim keybindings for CodeMirror 5",
   "files": [
     "vim.js",
